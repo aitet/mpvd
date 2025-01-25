@@ -5,7 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"syscall"
 )
 
 func dmenu(options []string, args string) string {
@@ -58,6 +60,19 @@ func main() {
 			fmt.Printf("Error reading directory: %v\n", err)
 			os.Exit(1)
 		}
+
+		// Sort by birth time (newest first)
+		sort.Slice(files, func(i, j int) bool {
+			fi, _ := files[i].Info()
+			fj, _ := files[j].Info()
+			si := fi.Sys().(*syscall.Stat_t).Ctim
+			sj := fj.Sys().(*syscall.Stat_t).Ctim
+			// Compare seconds (and if needed, nanoseconds)
+			if si.Sec == sj.Sec {
+				return si.Nsec > sj.Nsec
+			}
+			return si.Sec > sj.Sec
+		})
 
 		var videos = []string{"download"}
 		for _, file := range files {
