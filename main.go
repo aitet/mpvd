@@ -10,6 +10,21 @@ import (
 	"syscall"
 )
 
+func run(bin string, args ...[]string) {
+	var a []string
+	for _, s := range args {
+		a = append(a, s...)
+	}
+	cmd := exec.Command(bin, a...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Dir = filepath.Join(os.Getenv("XDG_VIDEOS_DIR"), "mpvd")
+
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to run command '%s %v': %v\n", bin, args, err)
+		os.Exit(1)
+	}
+}
+
 func dmenu(options []string, args string) string {
 	cmd := exec.Command("bemenu", "-i", args)
 	cmd.Stdin = strings.NewReader(strings.Join(options, "\n"))
@@ -27,6 +42,8 @@ func dmenu(options []string, args string) string {
 }
 
 func main() {
+	var args = []string{"-ic", "--embed-chapters"}
+
 	xdgVideosDir := os.Getenv("XDG_VIDEOS_DIR")
 	if xdgVideosDir == "" {
 		fmt.Println("XDG_VIDEOS_DIR is not set.")
@@ -34,27 +51,13 @@ func main() {
 	}
 
 	path := filepath.Join(xdgVideosDir, "mpvd")
-	out := "-o " + path + "/%(title)s.%(ext)s"
-	opt := "-ic --embed-chapters"
 	err := os.MkdirAll(path, 0755)
 	if err != nil {
 		fmt.Printf("Failed to create directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	terminal := os.Getenv("TERMINAL")
-	if terminal == "" {
-		terminal = "xterm" // fallback terminal if $TERMINAL is not set
-	}
-
-	play := func() bool {
-		choices := []string{"yes", "no"}
-		choice := dmenu(choices, "-p play?")
-		return choice == "yes"
-	}
-
-	args := os.Args[1:]
-	if len(args) == 0 {
+	if len(os.Args[1:]) == 0 {
 		files, err := os.ReadDir(path)
 		if err != nil {
 			fmt.Printf("Error reading directory: %v\n", err)
@@ -78,25 +81,44 @@ func main() {
 		for _, file := range files {
 			videos = append(videos, file.Name())
 		}
+		videos = append(videos, "delete all?")
 
-		video := dmenu(videos, "-p play")
-		if video == "download" {
-			if play() {
-				cmd := exec.Command(terminal, "-e", "yt-dlp", out, opt, "clipboard-placeholder")
-				cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-				cmd.Run()
+		switch choice := dmenu(videos, "-p play"); choice {
+		case "download":
+			if os.Getenv("BEMENU_BACKEND") == "curses" {
+				if dmenu([]string{"yes", "no"}, "-p play?") == "yes" {
+					args = append(args, "--exec=mpv")
+				}
+			} else {
+				args = append(args, "--exec=mpv")
 			}
+			cmd := exec.Command("clipboard", "-o")
+
+			clipboard, err := cmd.Output()
+			if err != nil {
+				fmt.Println("Error getting clipboard: ", err)
+				os.Exit(1)
+			}
+
+			args = append(args, string(clipboard))
+			run("yt-dlp", args)
 			os.Exit(0)
-		} else {
-			cmd := exec.Command("mpv", filepath.Join(path, video))
-			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-			cmd.Run()
+		case "delete all?":
+			if dmenu([]string{"yes", "no"}, "-p you sure?") == "yes" {
+				os.RemoveAll(path)
+				os.Exit(0)
+			}
+		default:
+			run("mpv", []string{choice})
+			os.Exit(0)
 		}
+
 	} else {
-		if play() {
-			cmd := exec.Command(terminal, "-e", "yt-dlp", out, opt, strings.Join(args, " "))
-			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-			cmd.Run()
+		if dmenu([]string{"yes", "no"}, "-p play?") == "yes" {
+			args = append(args, "--exec=mpv")
 		}
+		args = append(args, strings.Join(os.Args[1:], " "))
+		run("yt-dlp", args)
+		os.Exit(0)
 	}
 }
