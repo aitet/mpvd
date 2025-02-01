@@ -10,6 +10,8 @@ import (
 	"syscall"
 )
 
+var path string
+
 func run(bin string, args ...[]string) {
 	var a []string
 	for _, s := range args {
@@ -17,7 +19,7 @@ func run(bin string, args ...[]string) {
 	}
 	cmd := exec.Command(bin, a...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	cmd.Dir = filepath.Join(os.Getenv("XDG_VIDEOS_DIR"), "mpvd")
+	cmd.Dir = path
 
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to run command '%s %v': %v\n", bin, args, err)
@@ -25,16 +27,15 @@ func run(bin string, args ...[]string) {
 	}
 }
 
-func dmenu(options []string, args string) string {
-	cmd := exec.Command("bemenu", "-i", args)
+func dmenu(options []string, args ...[]string) string {
+	var a = []string{"-i"}
+	for _, s := range args {
+		a = append(a, s...)
+	}
+	cmd := exec.Command("bemenu", a...)
 	cmd.Stdin = strings.NewReader(strings.Join(options, "\n"))
 	out, err := cmd.Output()
-	if err != nil {
-		fmt.Println("Error running dmenu:", err)
-		os.Exit(1)
-	}
-
-	if string(out) == "" {
+	if err != nil || string(out) == "" {
 		os.Exit(1)
 	}
 
@@ -50,7 +51,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	path := filepath.Join(xdgVideosDir, "mpvd")
+	path = filepath.Join(xdgVideosDir, "mpvd")
 	err := os.MkdirAll(path, 0755)
 	if err != nil {
 		fmt.Printf("Failed to create directory: %v\n", err)
@@ -83,10 +84,10 @@ func main() {
 		}
 		videos = append(videos, "delete all?")
 
-		switch choice := dmenu(videos, "-p play"); choice {
+		switch choice := dmenu(videos, []string{"-p", "play", "-W", "0.8"}); choice {
 		case "download":
 			if os.Getenv("BEMENU_BACKEND") == "curses" {
-				if dmenu([]string{"yes", "no"}, "-p play?") == "yes" {
+				if dmenu([]string{"yes", "no"}, []string{"-p", "play?"}) == "yes" {
 					args = append(args, "--exec=mpv")
 				}
 			} else {
@@ -104,7 +105,7 @@ func main() {
 			run("yt-dlp", args)
 			os.Exit(0)
 		case "delete all?":
-			if dmenu([]string{"yes", "no"}, "-p you sure?") == "yes" {
+			if dmenu([]string{"yes", "no"}, []string{"-p", "you sure?"}) == "yes" {
 				os.RemoveAll(path)
 				os.Exit(0)
 			}
@@ -114,7 +115,7 @@ func main() {
 		}
 
 	} else {
-		if dmenu([]string{"yes", "no"}, "-p play?") == "yes" {
+		if dmenu([]string{"yes", "no"}, []string{"-p", "play?"}) == "yes" {
 			args = append(args, "--exec=mpv")
 		}
 		args = append(args, strings.Join(os.Args[1:], " "))
